@@ -8,6 +8,13 @@ variable "server_port" {
     default = 8080
 }
 
+data "aws_subnets" "default" {
+    filter {
+        name = "vpc-id"
+        values = [data.aws_vpc.default.id]
+    }
+}
+
 output "public_ip" {
     value = aws_instance.my-instance.public_ip
     description = "The public IP address of the web server"
@@ -24,7 +31,7 @@ resource "aws_security_group" "instance" {
     }
 }
 
-resource "aws_instance" "my-instance" {
+resource "aws_launch_configuration" "learn-asg" {
     ami = "ami-042e8287309f5df03"
     instance_type = "t3.micro"
     vpc_security_group_ids = [aws_security_group.instance.id]
@@ -34,14 +41,78 @@ resource "aws_instance" "my-instance" {
                 echo "Hello, World" > index.html
                 nohup busybox httpd -f -p ${var.server_port} &
                 EOF
-    
-    user_data_replace_on_change = true
-                
-    tags = {
-        Name = "terraform-example"
+
+    lifecycle {
+        create_before_destroy = true
+    }
+}
+
+resource "aws_autoscaling_group" "learn-asg" {
+    launch_configuration = aws_launch_configuration.learn-asg
+    vpc_zone_identifier = data.aws_subnets.default.ids
+
+    min size = 2
+    max size = 10
+
+    tag{
+        key = "Name"
+        value = "terraform-asg-learnasg
+        propagate_at_launch = true
+    }
+}
+
+resource "aws_lb" "example" {
+    name = "terraform-asg-example"
+    load_balancer_type = "application"
+    subnets = data.aws_subnets.default.ids
+}
+
+resource "aws_lb_listener" "http" {
+    load_balancer_arn = aws_lb.example.arn 
+    port = 80
+    protocol = "HTTP"
+
+    default_action {
+        type = "fixed-response"
+
+        fixed_response {
+            content_type = "text/plain"
+            message_body = "404: page not found"
+            status_code = 404
+        }
+
+    }
+}
+
+resource "aws_security_group" "alb" {
+    name = "terraform-example-alb"
+
+    ingress {
+        from_port = 80
+        to_port = 80
+        protocol = "tcp"
+        cidr_blocks = ["0.0.0.0/0]
     }
 
+    egress {
+        from_port = 0
+        to_port = 0
+        protocol = "-1"
+        cidr_blocks = ["0.0.0.0/0"]
+    }
 }
+
+resource "aws_lb" "example" {
+    name = "terraform-asg-example"
+    load_balancer_type = "application"
+    subnets = data.aws_subnets.default.ids
+    security_groups = [aws_security_group.alb.id]
+}
+
+
+
+
+
 
  
 
